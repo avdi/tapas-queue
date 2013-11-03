@@ -2,13 +2,44 @@ require "tapas/queue/version"
 require "thread"
 
 module Tapas
+  class Condition
+    def initialize(lock)
+      @lock = lock
+      @cv   = ConditionVariable.new
+    end
+
+    def wait(timeout=nil)
+      @cv.wait(@lock.mutex, timeout)
+    end
+
+    def signal
+      @cv.signal
+    end
+  end
+
+  class Lock
+    attr_reader :mutex
+
+    def initialize
+      @mutex = Mutex.new
+    end
+
+    def synchronize(&block)
+      @mutex.synchronize(&block)
+    end
+  end
+
   class Queue
-    def initialize(max_size = :infinite)
+    def initialize(max_size = :infinite, options={})
       @items           = []
       @max_size        = max_size
-      @lock            = Mutex.new
-      @space_available = ConditionVariable.new
-      @item_available  = ConditionVariable.new
+      @lock            = options.fetch(:lock) { Lock.new }
+      @space_available = options.fetch(:space_available_condition) {
+        Condition.new(@lock)
+      }
+      @item_available  = options.fetch(:item_available_condition) {
+        Condition.new(@lock)
+      }
     end
 
     def push(obj, timeout=:never, &timeout_policy)
@@ -54,7 +85,7 @@ module Tapas
         loop do
           cv_timeout = timeout == :never ? nil : deadline - Time.now
           if !condition_predicate.call && cv_timeout.to_f >= 0
-            cv.wait(@lock, cv_timeout)
+            cv.wait(cv_timeout)
           end
           if condition_predicate.call
             return yield

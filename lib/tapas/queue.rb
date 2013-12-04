@@ -73,11 +73,10 @@ module Tapas
       @items           = []
       @max_size        = max_size
       @lock            = options.fetch(:lock) { Lock.new }
-      @space_available = options.fetch(:space_available_condition) {
-        Condition.new(@lock)
-      }
       @space_available_condition = SpaceAvailableCondition.new(
-        self, @lock, @space_available)
+        self,
+        @lock,
+        options.fetch(:space_available_condition) {Condition.new(@lock)} )
       @item_available  = options.fetch(:item_available_condition) {
         Condition.new(@lock)
       }

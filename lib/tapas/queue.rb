@@ -42,15 +42,15 @@ module Tapas
       end
 
       def wait_for_condition(
-          condition_predicate, timeout=:never, timeout_policy=->{nil})
+          timeout=:never, timeout_policy=->{nil})
         deadline = timeout == :never ? :never : Time.now + timeout
         @lock.synchronize do
           loop do
             cv_timeout = timeout == :never ? nil : deadline - Time.now
-            if !condition_predicate.call && cv_timeout.to_f >= 0
+            if !condition_holds? && cv_timeout.to_f >= 0
               condition.wait(cv_timeout)
             end
-            if condition_predicate.call
+            if condition_holds?
               return yield
             elsif deadline == :never || deadline > Time.now
               next
@@ -63,7 +63,11 @@ module Tapas
 
       private
 
-      attr_reader :condition
+      def condition_holds?
+        !queue.full?
+      end
+
+      attr_reader :queue, :condition
     end
 
     def initialize(max_size = :infinite, options={})
@@ -84,11 +88,7 @@ module Tapas
       timeout_policy ||= -> do
         raise "Push timed out"
       end
-      @space_available_condition.wait_for_condition(
-        ->{!full?},
-        timeout,
-        timeout_policy) do
-
+      @space_available_condition.wait_for_condition(timeout, timeout_policy) do
         @items.push(obj)
         @item_available.signal
       end
@@ -106,6 +106,11 @@ module Tapas
         @space_available_condition.signal unless full?
         item
       end
+    end
+
+    def full?
+      return false if @max_size == :infinite
+      @max_size <= @items.size
     end
 
     private
@@ -128,11 +133,6 @@ module Tapas
           end
         end
       end
-    end
-
-    def full?
-      return false if @max_size == :infinite
-      @max_size <= @items.size
     end
 
   end

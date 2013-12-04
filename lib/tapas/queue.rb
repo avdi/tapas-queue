@@ -30,6 +30,42 @@ module Tapas
   end
 
   class Queue
+    class SpaceAvailableCondition
+      def initialize(queue, lock, condition)
+        @queue     = queue
+        @lock      = lock
+        @condition = condition
+      end
+
+      def signal
+        condition.signal
+      end
+
+      def wait_for_condition(
+          cv, condition_predicate, timeout=:never, timeout_policy=->{nil})
+        deadline = timeout == :never ? :never : Time.now + timeout
+        @lock.synchronize do
+          loop do
+            cv_timeout = timeout == :never ? nil : deadline - Time.now
+            if !condition_predicate.call && cv_timeout.to_f >= 0
+              cv.wait(cv_timeout)
+            end
+            if condition_predicate.call
+              return yield
+            elsif deadline == :never || deadline > Time.now
+              next
+            else
+              return timeout_policy.call
+            end
+          end
+        end
+      end
+
+      private
+
+      attr_reader :condition
+    end
+
     def initialize(max_size = :infinite, options={})
       @items           = []
       @max_size        = max_size
@@ -37,6 +73,8 @@ module Tapas
       @space_available = options.fetch(:space_available_condition) {
         Condition.new(@lock)
       }
+      @space_available_condition = SpaceAvailableCondition.new(
+        self, @lock, @space_available)
       @item_available  = options.fetch(:item_available_condition) {
         Condition.new(@lock)
       }
@@ -46,7 +84,7 @@ module Tapas
       timeout_policy ||= -> do
         raise "Push timed out"
       end
-      wait_for_condition(
+      @space_available_condition.wait_for_condition(
         @space_available,
         ->{!full?},
         timeout,
@@ -66,17 +104,12 @@ module Tapas
         timeout_policy) do
 
         item = @items.shift
-        @space_available.signal unless full?
+        @space_available_condition.signal unless full?
         item
       end
     end
 
     private
-
-    def full?
-      return false if @max_size == :infinite
-      @max_size <= @items.size
-    end
 
     def wait_for_condition(
         cv, condition_predicate, timeout=:never, timeout_policy=->{nil})
@@ -97,5 +130,11 @@ module Tapas
         end
       end
     end
+
+    def full?
+      return false if @max_size == :infinite
+      @max_size <= @items.size
+    end
+
   end
 end

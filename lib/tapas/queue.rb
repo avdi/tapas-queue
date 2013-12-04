@@ -42,13 +42,13 @@ module Tapas
       end
 
       def wait_for_condition(
-          cv, condition_predicate, timeout=:never, timeout_policy=->{nil})
+          condition_predicate, timeout=:never, timeout_policy=->{nil})
         deadline = timeout == :never ? :never : Time.now + timeout
         @lock.synchronize do
           loop do
             cv_timeout = timeout == :never ? nil : deadline - Time.now
             if !condition_predicate.call && cv_timeout.to_f >= 0
-              cv.wait(cv_timeout)
+              condition.wait(cv_timeout)
             end
             if condition_predicate.call
               return yield
@@ -85,7 +85,6 @@ module Tapas
         raise "Push timed out"
       end
       @space_available_condition.wait_for_condition(
-        @space_available,
         ->{!full?},
         timeout,
         timeout_policy) do

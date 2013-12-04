@@ -41,8 +41,7 @@ module Tapas
         condition.signal
       end
 
-      def wait_for_condition(
-          timeout=:never, timeout_policy=->{nil})
+      def wait(timeout=:never, timeout_policy=->{nil})
         deadline = timeout == :never ? :never : Time.now + timeout
         @lock.synchronize do
           loop do
@@ -88,7 +87,7 @@ module Tapas
       timeout_policy ||= -> do
         raise "Push timed out"
       end
-      @space_available_condition.wait_for_condition(timeout, timeout_policy) do
+      @space_available_condition.wait(timeout, timeout_policy) do
         @items.push(obj)
         @item_available.signal
       end

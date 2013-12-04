@@ -69,6 +69,45 @@ module Tapas
       attr_reader :queue, :condition
     end
 
+    class ItemAvailableCondition
+      def initialize(queue, lock, condition)
+        @queue     = queue
+        @lock      = lock
+        @condition = condition
+      end
+
+      def signal
+        condition.signal
+      end
+
+      def wait(timeout=:never, timeout_policy=->{nil})
+        deadline = timeout == :never ? :never : Time.now + timeout
+        @lock.synchronize do
+          loop do
+            cv_timeout = timeout == :never ? nil : deadline - Time.now
+            if !condition_holds? && cv_timeout.to_f >= 0
+              condition.wait(cv_timeout)
+            end
+            if condition_holds?
+              return yield
+            elsif deadline == :never || deadline > Time.now
+              next
+            else
+              return timeout_policy.call
+            end
+          end
+        end
+      end
+
+      private
+
+      def condition_holds?
+        !queue.empty?
+      end
+
+      attr_reader :queue, :condition
+    end
+
     def initialize(max_size = :infinite, options={})
       @items           = []
       @max_size        = max_size
@@ -77,9 +116,10 @@ module Tapas
         self,
         @lock,
         options.fetch(:space_available_condition) {Condition.new(@lock)} )
-      @item_available  = options.fetch(:item_available_condition) {
-        Condition.new(@lock)
-      }
+      @item_available_condition = ItemAvailableCondition.new(
+        self,
+        @lock,
+        options.fetch(:item_available_condition) {Condition.new(@lock)} )
     end
 
     def push(obj, timeout=:never, &timeout_policy)
@@ -88,18 +128,13 @@ module Tapas
       end
       @space_available_condition.wait(timeout, timeout_policy) do
         @items.push(obj)
-        @item_available.signal
+        @item_available_condition.signal
       end
     end
 
     def pop(timeout = :never, &timeout_policy)
       timeout_policy ||= ->{nil}
-      wait_for_condition(
-        @item_available,
-        ->{@items.any?},
-        timeout,
-        timeout_policy) do
-
+      @item_available_condition.wait(timeout, timeout_policy) do
         item = @items.shift
         @space_available_condition.signal unless full?
         item
@@ -111,27 +146,8 @@ module Tapas
       @max_size <= @items.size
     end
 
-    private
-
-    def wait_for_condition(
-        cv, condition_predicate, timeout=:never, timeout_policy=->{nil})
-      deadline = timeout == :never ? :never : Time.now + timeout
-      @lock.synchronize do
-        loop do
-          cv_timeout = timeout == :never ? nil : deadline - Time.now
-          if !condition_predicate.call && cv_timeout.to_f >= 0
-            cv.wait(cv_timeout)
-          end
-          if condition_predicate.call
-            return yield
-          elsif deadline == :never || deadline > Time.now
-            next
-          else
-            return timeout_policy.call
-          end
-        end
-      end
+    def empty?
+      @items.empty?
     end
-
   end
 end

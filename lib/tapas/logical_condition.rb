@@ -1,9 +1,14 @@
 module Tapas
   class LogicalCondition
-    def initialize(client, lock, condition)
-      @client     = client
+    def initialize(
+        client:    nil,
+        lock:      Lock.new,
+        condition: Condition.new(lock),
+        test:      ->{false})
+      @client    = client
       @lock      = lock
       @condition = condition
+      @test      = test
     end
 
     def signal
@@ -31,6 +36,10 @@ module Tapas
 
     private
 
-    attr_reader :client, :condition
+    def condition_holds?
+      test.call
+    end
+
+    attr_reader :client, :condition, :test
   end
 end

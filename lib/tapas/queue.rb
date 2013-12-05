@@ -31,32 +31,22 @@ module Tapas
   end
 
   class Queue
-    class SpaceAvailableCondition < LogicalCondition
-      private
-      def condition_holds?
-        !client.full?
-      end
-    end
-
-    class ItemAvailableCondition < LogicalCondition
-      private
-      def condition_holds?
-        !client.empty?
-      end
-    end
-
     def initialize(max_size = :infinite, options={})
       @items           = []
       @max_size        = max_size
       @lock            = options.fetch(:lock) { Lock.new }
-      @space_available_condition = SpaceAvailableCondition.new(
-        self,
-        @lock,
-        options.fetch(:space_available_condition) {Condition.new(@lock)} )
-      @item_available_condition = ItemAvailableCondition.new(
-        self,
-        @lock,
-        options.fetch(:item_available_condition) {Condition.new(@lock)} )
+      @space_available_condition = LogicalCondition.new(
+        lock: @lock,
+        condition: options.fetch(:space_available_condition) {
+          Condition.new(@lock)
+        },
+        test: ->{ !full? })
+      @item_available_condition = LogicalCondition.new(
+        lock: @lock,
+        condition: options.fetch(:item_available_condition) {
+          Condition.new(@lock)
+        },
+        test: ->{ !empty? })
     end
 
     def push(obj, timeout=:never, &timeout_policy)
